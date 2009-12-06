@@ -1,3 +1,24 @@
+Changes to davisp's EEP0018:
+
+1. yajl_encode_string() adds an option "encode_utf8". If true, valid UTF-8 sequences are 
+   encoded to \uXXXX format, otherwise are output as is. Invalid sequences are still encoded 
+   to \u00XX format. 
+
+2. encode_json.c. The following erlang terms are encoded to json maps:
+   * {[ {K,V}, ... ]}, this is the original one.
+   * [ {K,V}, ... ], simplified notation
+   * {struct, [{K,V}, ...]}, this is mochijson2's notation.
+
+   still, [] is mapped to empty json array. {[]} means empty json map.
+
+3. Rewrite eep0018.erl according to Driver's Efficiency Guide.
+
+4. Simple makefile, no need to use autoconf mechanism.
+
+
+===========================================
+
+
 This module strives to prepare an EEP0018 implemenation. It implements most of the 
 functionality described there, with some additional features.  
 

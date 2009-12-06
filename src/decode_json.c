@@ -231,9 +231,11 @@ close_object(Decoder* dec)
         CHECK(add_term(dec, ERL_DRV_LIST));
         CHECK(add_term(dec, dec->obj_members[dec->obj_used-1]+1));
         
+		/*
         // Close tuple
         CHECK(add_term(dec, ERL_DRV_TUPLE));
         CHECK(add_term(dec, 1));
+        */
     }
     else if(dec->obj_types[dec->obj_used-1] == ARRAY_TYPE)
     {

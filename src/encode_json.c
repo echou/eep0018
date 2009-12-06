@@ -26,6 +26,7 @@
 #define STRING      107
 #define LIST        108
 #define BINARY      109
+#define BIGNUM		110
 #define VERSION     131
 
 int
@@ -137,18 +138,15 @@ done:
     return ret;
 }
 
-int
-map_to_json(char* buf, int* index, yajl_gen handle)
+/*
+ * 只处理map的[{k,v},...]部分
+ */
+int map_to_json_inner(char* buf, int* index, yajl_gen handle) 
 {
-    char* key = NULL;
-    int ret = ERROR;
-    int i, arity, size;
+	int ret = ERROR;
+	int i, arity, size;
 
-    // {[{<<"foo">>, 1}]} -> {"foo": 1}
-    if(ei_decode_tuple_header(buf, index, &arity)) goto done;
-    if(arity != 1) goto done;
-
-    if(ei_decode_list_header(buf, index, &arity)) goto done;
+	if(ei_decode_list_header(buf, index, &arity)) goto done;
 
     if(yajl_gen_map_open(handle) != yajl_gen_status_ok) goto done;
 
@@ -162,6 +160,7 @@ map_to_json(char* buf, int* index, yajl_gen handle)
 
     if(yajl_gen_map_close(handle) != yajl_gen_status_ok) goto done;
 
+
     if(arity > 0)
     {
         if(ei_decode_list_header(buf, index, &arity)) goto done;
@@ -174,13 +173,91 @@ done:
     return ret;
 }
 
+int map_to_json_header(char* buf, int* index, yajl_gen handle) 
+{
+    int ret = ERROR;
+    int arity;
+    if (ei_decode_tuple_header(buf, index, &arity)) goto done;
+
+    if (arity == 2)
+    {
+        char atom[MAXATOMLEN+1];
+        if (ei_decode_atom(buf, index, atom)) goto done;
+		if(strcmp(atom, "struct") != 0 && strcmp(atom, "obj") != 0) goto done;
+	} 
+	else if (arity != 1)
+	{
+		goto done;
+	}
+    ret = OK;
+done:
+    return ret;
+}
+
+/*
+ * The following notations are explained as MAP:
+ * {struct, [{key, value},...]}
+ * {[{key, value}, ...]}
+ * [{key, value}, ...]
+ */
+int
+map_to_json(char* buf, int* index, yajl_gen handle)
+{
+    int ret = ERROR;
+
+    if (map_to_json_header(buf, index, handle)!=OK) goto done;
+
+	if(map_to_json_inner(buf, index, handle)!=OK) goto done;
+	
+    ret = OK;
+
+done:
+    return ret;
+}
+
+int peek_tuple_first_atom(char* buf, int* index, char *atom) 
+{
+    int ret = ERROR;
+    int arity;
+    int old_index = *index;
+
+    if(ei_decode_tuple_header(buf, index, &arity)) goto done;
+    if (arity < 1) goto done;
+
+    if(ei_decode_atom(buf, index, atom)) goto done;
+    ret = OK;
+done:
+    *index = old_index;
+    return ret;
+}
+
+/*
+ * 如果形如[{key, value},...]，则应该是map_to_json
+ */
 int
 array_to_json(char* buf, int* index, yajl_gen handle)
 {
     int ret = ERROR;
-    int i, arity;
+    int i, arity, type, size;
+	int old_index = *index; // remember old index
 
     if(ei_decode_list_header(buf, index, &arity)) goto done;
+
+    if(ei_get_type(buf, index, &type, &size)) goto done;
+
+    if(type == TUPLE) 
+    {
+        char atom[MAXATOMLEN+1];
+		if (size == 2) {
+            if (peek_tuple_first_atom(buf, index, atom)!=OK  ||
+                strcmp(atom, "struct")!=0 && strcmp(atom, "obj") != 0) 
+            {
+                *index = old_index;
+                if (map_to_json_inner(buf, index, handle)!=OK) goto done;
+                goto ok;
+            }
+        }
+	} 
 
     if(yajl_gen_array_open(handle) != yajl_gen_status_ok) goto done;
     for(i = 0; i < arity; i++)
@@ -196,8 +273,8 @@ array_to_json(char* buf, int* index, yajl_gen handle)
         if(arity != 0) goto done;
     }
 
+ok:
     ret = OK;
-
 done:
     return ret;
 }
@@ -240,11 +317,21 @@ value_to_json(char* buf, int* index, yajl_gen handle)
         if(ei_decode_version(buf, index, &type)) goto done;
         if(!value_to_json(buf, index, handle)) goto done;
     }
-    else if(type == LONG || type == NEG_LONG)
+    else if(type == LONG || type == NEG_LONG) 
     {
         if(ei_decode_long(buf, index, &lval)) goto done;
         if(yajl_gen_integer(handle, lval) != yajl_gen_status_ok) goto done;
     }
+	else if(type == BIGNUM) 
+	{
+        EI_LONGLONG l;
+        char num[128];
+
+        if (ei_decode_longlong(buf, index, &l)) goto done;
+
+        snprintf(num, sizeof(num)-1, "%lld", l);
+        if (yajl_gen_number(handle, num, strlen(num)) != yajl_gen_status_ok) goto done;
+	}
     else if(type == DOUBLE)
     {    
         if(ei_decode_double(buf, index, &dval)) goto done;
@@ -291,13 +378,15 @@ done:
 int
 encode_json(char* buf, int len, char** rbuf, int rlen)
 {
-    int index = 0;
+    int index = 1;
     int ret = -1;
     ErlDrvBinary* rval = NULL;
     const unsigned char* json = NULL;
     unsigned int jsonlen = 0;
+    
+    index = 0;
 
-    yajl_gen_config config = {0, NULL};
+    yajl_gen_config config = {0, NULL, 1};
     yajl_gen handle = yajl_gen_alloc(&config, NULL);
 
     if(value_to_json(buf, &index, handle) != OK) goto done;

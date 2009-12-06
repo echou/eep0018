@@ -39,22 +39,22 @@
 
 static void CharToHex(unsigned char c, char * hexBuf)
 {
-    const char * hexchar = "0123456789ABCDEF";
+    const char * hexchar = "0123456789abcdef";
     hexBuf[0] = hexchar[c >> 4];
     hexBuf[1] = hexchar[c & 0x0F];
 }
 
 void
 yajl_string_encode(yajl_buf buf, const unsigned char * str,
-                   unsigned int len)
+                   unsigned int len, int encode_utf8)
 {
     unsigned int beg = 0;
     unsigned int end = 0;    
-    char hexBuf[7];
-    hexBuf[0] = '\\'; hexBuf[1] = 'u'; hexBuf[2] = '0'; hexBuf[3] = '0';
-    hexBuf[6] = 0;
+    char hexBuf[7] = "\\u0000";
+    char rawBuf[5] = "\0\0\0\0";
 
     while (end < len) {
+		unsigned int inc = 1;
         const char * escaped = NULL;
         switch (str[end]) {
             case '\r': escaped = "\\r"; break;
@@ -66,18 +66,73 @@ yajl_string_encode(yajl_buf buf, const unsigned char * str,
             case '\b': escaped = "\\b"; break;
             case '\t': escaped = "\\t"; break;
             default:
-                if ((unsigned char) str[end] < 32) {
-                    CharToHex(str[end], hexBuf + 4);
-                    escaped = hexBuf;
-                }
+                // utf8: U-00000080 - U-000007FF: 110xxxxx 10xxxxxx
+                    if (((str[end] & 0xE0) == 0xC0) && 
+                        (end+1<len) && 
+                        ((str[end+1] & 0xC0) == 0x80)) 
+                    {
+                        if (encode_utf8) 
+                        {
+                            unsigned int cp = (str[end] & 0x1F) << 6;
+                            cp |= str[end+1] & 0x3F;
+                            inc = 2;
+                            CharToHex((cp >> 8) & 0xFF, hexBuf + 2);
+                            CharToHex(cp & 0xFF, hexBuf + 4);
+                            escaped = hexBuf;
+                        } else {
+                            rawBuf[0] = str[end];
+                            rawBuf[1] = str[end+1];
+                            rawBuf[2] = 0;
+                            rawBuf[3] = 0;
+                            inc = 2;
+                            escaped = rawBuf;
+                        }
+                        break;
+                    }
+                    // utf8: U-00000800 - U-0000FFFF: 1110xxxx 10xxxxxx 10xxxxxx
+                    else 
+                    if (((str[end] & 0xF0) == 0xE0) &&
+                        (end+2<len) &&
+                        ((str[end+1] & 0xC0) == 0x80) &&
+                        ((str[end+2] & 0xC0) == 0x80))
+                    {
+                        if (encode_utf8) 
+                        {
+                            unsigned int cp = (str[end] & 0x0F) << 12;
+                            cp |= (str[end+1] & 0x3F) << 6;
+                            cp |= (str[end+2] & 0x3F);
+                            inc = 3;
+                            CharToHex((cp >> 8) & 0xFF, hexBuf + 2);
+                            CharToHex(cp & 0xFF, hexBuf + 4);
+                            escaped = hexBuf;
+                        } else 
+                        {
+                            rawBuf[0] = str[end];
+                            rawBuf[1] = str[end+1];
+                            rawBuf[2] = str[end+2];
+                            rawBuf[3] = 0;
+                            inc = 3;
+                            escaped = rawBuf;
+                        }
+                        break;
+                    }
+
+                    if (!(str[end] >= ' ' && str[end] < 127)) { // don't know why isprint doesn't work!!! 
+                        // convert to \uXXXX in spite of encode_utf8 or not
+                        hexBuf[2] = '0';
+                        hexBuf[3] = '0';
+                        CharToHex(str[end], hexBuf + 4);
+                        escaped = hexBuf;
+                    }
                 break;
         }
         if (escaped != NULL) {
             yajl_buf_append(buf, str + beg, end - beg);
             yajl_buf_append(buf, escaped, strlen(escaped));
-            beg = ++end;
+            end += inc;
+            beg = end;
         } else {
-            ++end;
+            end += inc;
         }
     }
     yajl_buf_append(buf, str + beg, end - beg);

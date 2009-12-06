@@ -71,6 +71,9 @@ extern "C" {
          *  some number of spaces.  default is four spaces '    '.  This
          *  member is only relevant when beautify is true */
         const char * indentString;
+        /** whether or not encoding UTF8 sequences into \uXXXX format.
+         *  UTF8 validation is always checked in both cases.  */ 
+        int encode_utf8;
     } yajl_gen_config;
 
     /** allocate a generator handle

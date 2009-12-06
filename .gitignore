@@ -3,3 +3,6 @@
 *.beam
 *.swp
 erl_crash.dump
+priv
+ebin
+.obj
