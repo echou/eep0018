@@ -17,8 +17,8 @@
 #undef VERSION
 #endif
 
-#define LONG        97
-#define NEG_LONG    98
+#define LONG        97				// example: [0, 255]
+#define NEG_LONG    98				// example: [-134217728,-1]  [256,134217727]	(2^27-1)
 #define DOUBLE      99
 #define ATOM        100
 #define TUPLE       104
@@ -26,7 +26,7 @@
 #define STRING      107
 #define LIST        108
 #define BINARY      109
-#define BIGNUM		110
+#define BIGNUM		110				// very big positive or negative numbers
 #define VERSION     131
 
 int
@@ -103,6 +103,9 @@ key_to_json(char* buf, int* index, yajl_gen handle)
     unsigned char* string;
 
     if(ei_get_type(buf, index, &type, &size)) goto done;
+
+    //fprintf(stderr, "Type=%d\n", type);
+	
     if(type == BINARY)
     {
         return binary_to_json(buf, index, handle);
@@ -126,6 +129,42 @@ key_to_json(char* buf, int* index, yajl_gen handle)
         }
         *index += size;
     }
+    else if(type == LONG)				// UNSIGNED
+    {
+    	unsigned long l;
+    	unsigned char numstring[6];
+			
+		if (ei_decode_ulong(buf, index, &l)) goto done;
+		snprintf(numstring, sizeof(numstring)-1, "%lu", l);
+	    if(yajl_gen_string(handle, numstring, strlen(numstring)) != yajl_gen_status_ok)
+		{
+			goto done;
+		}
+    }
+    else if(type == NEG_LONG)			// SIGNED
+    {
+    	signed long l;
+    	unsigned char numstring[12];
+			
+		if (ei_decode_long(buf, index, &l)) goto done;
+		snprintf(numstring, sizeof(numstring)-1, "%ld", l);
+	    if(yajl_gen_string(handle, numstring, strlen(numstring)) != yajl_gen_status_ok)
+		{
+			goto done;
+		}
+    }
+	else if(type == BIGNUM) 			// SIGNED VERY BIG
+	{
+		EI_LONGLONG l;
+		unsigned char numstring[128];
+
+		if (ei_decode_longlong(buf, index, &l)) goto done;
+		snprintf(numstring, sizeof(numstring)-1, "%lld", l);
+		if(yajl_gen_string(handle, numstring, strlen(numstring)) != yajl_gen_status_ok)
+		{
+			goto done;
+		}
+	}
     else
     {
         // Invalid key type.
